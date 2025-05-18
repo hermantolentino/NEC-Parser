@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>NEC Converter</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #222; color: #eee; }
+    .tabs { display: flex; border-bottom: 1px solid #555; margin-top: 20px; }
+    .tab { padding: 10px 20px; cursor: pointer; border: 1px solid #555; background: #333; color: #eee; }
+    .tab.active { background: #222; font-weight: bold; }
+    .tab-content { display: none; border: 1px solid #555; padding: 20px; background: #111; }
+    .tab-content.active { display: block; }
+    pre { background: #111; padding: 10px; overflow: auto; white-space: pre-wrap; color: #eee; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; color: #eee; }
+    th, td { border: 1px solid #555; padding: 8px; text-align: left; }
+    th { background: #333; }
+    #viz-canvas { width: 100%; height: 600px; position: relative; }
+    .viz-instructions { margin-top: 10px; font-size: 0.9em; color: #aaa; }
+    .viz-toggles { margin-top: 10px; color: #ccc; }
+    .viz-toggles label { margin-right: 15px; }
+    .wire-label { color: #fff; background: rgba(0,0,0,0.6); padding: 2px 4px; border-radius: 2px; font-size: 12px; }
+  </style>
+  <!-- import-map so ES module can do `import * as THREE from 'three'` -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.150.1/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <h1>NEC Converter</h1>
+  {% if error %}
+    <p style="color:red;">{{ error }}</p>
+  {% endif %}
+  <form action="/" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".nec" required />
+    <button type="submit">Upload NEC File</button>
+  </form>
+
+  {% if show_results %}
+    <div class="tabs">
+      <div class="tab active" data-tab="original">Original NEC</div>
+      <div class="tab" data-tab="json">JSON Output</div>
+      <div class="tab" data-tab="reconv">Reconverted NEC</div>
+      <div class="tab" data-tab="fidelity">Fidelity Scores</div>
+      <div class="tab" data-tab="visualization">Visualization</div>
+      <div class="tab" data-tab="simulation">Simulation</div>
+    </div>
+
+    <div id="original" class="tab-content active">
+      <h2>Original NEC File</h2>
+      <p>Line count: {{ line_count }}, Card count: {{ card_count }}, Errors: {{ errors|length }}</p>
+      {% if errors %}
+        <h3>Validation Errors</h3>
+        <ul>
+          {% for e in errors %}
+            <li>Line {{ e.line_number }}: expected {{ e.validation.expected_params }} params but got {{ e.validation.actual_params }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <pre>{{ original_text }}</pre>
+    </div>
+
+    <div id="json" class="tab-content">
+      <h2>Parsed JSON</h2>
+      <pre>{{ json_data | tojson(indent=2) }}</pre>
+    </div>
+
+    <div id="reconv" class="tab-content">
+      <h2>Reconverted NEC File</h2>
+      <pre>{{ reconv_text }}</pre>
+    </div>
+
+    <div id="fidelity" class="tab-content">
+      <h2>Fidelity Scores</h2>
+      <table>
+        <thead>
+          <tr><th>Line</th><th>Type</th><th>Params</th><th>Similarity (%)</th><th>Count Align (%)</th><th>Value Align (%)</th><th>Overall (%)</th></tr>
+        </thead>
+        <tbody>
+          {% for s in fidelity_scores %}
+          <tr>
+            <td>{{ s.line_number }}</td>
+            <td>{{ s.type }}</td>
+            <td>{{ s.actual_params }}</td>
+            <td>{{ '%.2f'|format(s.similarity*100) }}</td>
+            <td>{{ '%.2f'|format(s.field_count_score*100) }}</td>
+            <td>{{ '%.2f'|format(s.value_alignment_score*100) }}</td>
+            <td>{{ '%.2f'|format(s.overall_score*100) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="visualization" class="tab-content">
+      <h2>Antenna Visualization</h2>
+      <div id="viz-canvas"></div>
+      <div class="viz-instructions">
+        Rotate: drag ⟷ | Zoom: scroll 🔍 | Pan: right‑drag
+      </div>
+      <div class="viz-toggles">
+        <label><input type="checkbox" id="toggle-grid" checked> Show Ground Grid</label>
+        <label><input type="checkbox" id="toggle-feed" checked> Show Feed Points</label>
+        <label><input type="checkbox" id="toggle-axes" checked> Show XYZ Axes</label>
+      </div>
+      <h3>Wire Geometry</h3>
+      <table id="wire-table">
+        <thead>
+          <tr><th>Tag</th><th>Length (m)</th><th>Start (x,y,z)</th><th>End (x,y,z)</th><th>Segments</th><th>Feed?</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="simulation" class="tab-content">
+    <h2>Simulation Tools</h2>
+    <p>Coming soon: current distributions, frequency sweeps, radiation pattern visualizations, etc.</p>
+    </div>
+
+    <!-- Tab switching -->
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab, .tab-content').forEach(el => el.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+          });
+        });
+      });
+    </script>
+
+    <!-- Expose geometry & feed data to the global scope -->
+<script>
+  window._necGeometry = {{ geometry | tojson }};
+  window._necFeedMap = {
+    {% for card in json_data.cards %}
+      {% if card.type == 'EX' %}{{ card.params[1] }}: true,{% endif %}
+    {% endfor %}
+  };
+</script>
+
+    <!-- External visualization logic (ES module) -->
+    <script type="module" src="{{ url_for('static', filename='js/visualization.js') }}"></script>
+  {% endif %}
+</body>
+</html>
