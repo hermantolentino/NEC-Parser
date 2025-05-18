@@ -2,80 +2,88 @@
 import re
 import ast
 
-# Matches lines that start with “SY ” (case‐insensitive)
+# Matches lines that start with “SY ” (case-insensitive)
 SY_RE = re.compile(r'^\s*SY\b', re.IGNORECASE)
 
 def safe_eval(expr, vars_dict):
     """
     Safely evaluate a numeric expression using only literals and previously-defined vars.
+    Supports: +, -, *, /, **, parentheses, numeric literals, and names from vars_dict.
     """
     node = ast.parse(expr, mode='eval').body
 
     def _eval(n):
+        # Binary operations
         if isinstance(n, ast.BinOp):
             l = _eval(n.left)
             r = _eval(n.right)
-            if isinstance(n.op, ast.Add):    return l + r
-            if isinstance(n.op, ast.Sub):    return l - r
-            if isinstance(n.op, ast.Mult):   return l * r
-            if isinstance(n.op, ast.Div):    return l / r
-            if isinstance(n.op, ast.Pow):    return l ** r
-        elif isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.USub):
-            return -_eval(n.operand)
-        elif isinstance(n, ast.Num):
+            if isinstance(n.op, ast.Add):  return l + r
+            if isinstance(n.op, ast.Sub):  return l - r
+            if isinstance(n.op, ast.Mult): return l * r
+            if isinstance(n.op, ast.Div):  return l / r
+            if isinstance(n.op, ast.Pow):  return l ** r
+            raise ValueError(f"Unsupported binary op {n.op}")
+
+        # Unary +/-
+        if isinstance(n, ast.UnaryOp):
+            val = _eval(n.operand)
+            if isinstance(n.op, ast.UAdd): return +val
+            if isinstance(n.op, ast.USub): return -val
+            raise ValueError(f"Unsupported unary op {n.op}")
+
+        # Python 3.8+ literal node
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(f"Unsupported constant type: {type(n.value).__name__}")
+
+        # Fallback for older versions
+        if hasattr(ast, 'Num') and isinstance(n, ast.Num):
             return n.n
-        elif isinstance(n, ast.Name):
-            return vars_dict[n.id]
-        else:
-            raise ValueError(f"Unsupported node in SY expression: {n}")
+
+        # Named symbol
+        if isinstance(n, ast.Name):
+            if n.id in vars_dict:
+                return vars_dict[n.id]
+            raise ValueError(f"Unknown symbol {n.id}")
+
+        raise ValueError(f"Unsupported AST node: {n!r}")
 
     return _eval(node)
 
 def resolve_sy(lines):
     """
-    First pass: collect all SY variable definitions.
-    Second pass: substitute their values into non‐SY, non‐comment lines,
-    but keep the original SY lines in the output.
+    Given a list of NEC lines (strings), returns a new list where:
+      - SY lines build a symbol table.
+      - Subsequent lines have any SY-symbol occurrences replaced by their values.
     """
     vars_dict = {}
-    # 1) Collect SY definitions
-    for raw in lines:
-        m = SY_RE.match(raw)
-        if m:
-            # everything after 'SY ' is the expression
-            expr = raw.strip()[3:].strip()
-            try:
-                vars_dict[expr.split('=')[0].strip()] = safe_eval(expr.split('=',1)[1].strip(), vars_dict)
-            except Exception:
-                # fallback to Python eval (restricted globals)
-                key, val = expr.split('=',1)
-                vars_dict[key.strip()] = eval(val, {}, vars_dict)
+    symbol_pattern = None
 
-    output = []
-    # Precompile var‐replacement regex
-    if vars_dict:
-        pattern = re.compile(r'\b(' + '|'.join(map(re.escape, vars_dict)) + r')\b')
-
-    # 2) Build resolved lines, preserving SY lines
-    for raw in lines:
-        stripped = raw.rstrip('\r\n')
-        if not stripped or stripped.startswith('*'):
-            # skip pure comments
-            continue
-
+    # First pass: build symbol table
+    for line in lines:
+        stripped = line.strip()
         if SY_RE.match(stripped):
-            # keep SY lines verbatim
-            output.append(stripped)
-            continue
+            _, rest = stripped.split(None, 1)
+            if '=' in rest:
+                name, expr = [s.strip() for s in rest.split('=', 1)]
+                try:
+                    vars_dict[name] = safe_eval(expr, vars_dict)
+                except Exception:
+                    pass
 
-        # substitute variables
-        if vars_dict:
+    # Precompile a regex to replace all symbols
+    if vars_dict:
+        symbol_pattern = re.compile(r'\b(' + '|'.join(map(re.escape, vars_dict.keys())) + r')\b')
+
+    # Second pass: substitute variables into all lines
+    output = []
+    for line in lines:
+        if symbol_pattern:
             def repl(mo):
                 return str(vars_dict[mo.group(1)])
-            resolved = pattern.sub(repl, stripped)
+            output.append(symbol_pattern.sub(repl, line.rstrip('\n')))
         else:
-            resolved = stripped
-
-        output.append(resolved)
+            output.append(line.rstrip('\n'))
 
     return output
