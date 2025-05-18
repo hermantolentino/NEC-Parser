@@ -3,182 +3,149 @@ import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.150.1/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'https://unpkg.com/three@0.150.1/examples/jsm/renderers/CSS2DRenderer.js';
 
-let initialized = false;
-function renderVisualization() {
-  if (initialized) return;
-  initialized = true;
+let scene, camera, renderer, labelRenderer, controls;
+let gridHelper, axesGroup, wireGroup, feedGroup;
+let tableBody;
 
-  // Retrieve data
-  const geomData = window._necGeometry || [];
-  const feedMap = window._necFeedMap || {};
-
-  // Container
+function initScene() {
   const container = document.getElementById('viz-canvas');
-  container.style.position = 'relative';
-  const width = container.clientWidth || window.innerWidth - 40;
-  const height = 600;
-  container.innerHTML = '';
+  while (container.firstChild) container.removeChild(container.firstChild);
 
-  // WebGL renderer
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(width, height);
-  renderer.domElement.style.position = 'relative';
+  scene = new THREE.Scene();
+  scene.up.set(0, 0, 1);
 
-  // CSS2D renderer
-  const labelRenderer = new CSS2DRenderer();
-  labelRenderer.setSize(width, height);
+  const w = container.clientWidth, h = container.clientHeight;
+  camera = new THREE.PerspectiveCamera(45, w/h, 0.1, 1000);
+  camera.up.set(0, 0, 1);
+  camera.position.set(0, -5, 5);
+  camera.lookAt(0, 0, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  container.appendChild(renderer.domElement);
+
+  labelRenderer = new CSS2DRenderer();
+  labelRenderer.setSize(w, h);
   labelRenderer.domElement.style.position = 'absolute';
   labelRenderer.domElement.style.top = '0';
-  labelRenderer.domElement.style.pointerEvents = 'none';
-
-  container.appendChild(renderer.domElement);
   container.appendChild(labelRenderer.domElement);
 
-  // Scene & camera
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-  camera.up.set(0, 0, 1);
+  controls = new OrbitControls(camera, labelRenderer.domElement);
+  controls.screenSpacePanning = false;
+  controls.update();
 
-  // Lighting
-  scene.add(new THREE.AmbientLight(0x555555));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  dirLight.position.set(0, 0, 100);
-  scene.add(dirLight);
-
-  // Helpers: grid
-  const gridHelper = new THREE.GridHelper(10, 10);
+  // Ground grid (XY plane)
+  gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+  gridHelper.rotation.x = Math.PI / 2;
   scene.add(gridHelper);
 
-  // Helpers: axes
-  const axesGroup = new THREE.Group();
-  const axisLabels = [];
-  const axesCfg = [
-    { vec: [5, 0, 0], color: 0xff0000, text: 'X' },
-    { vec: [0, 5, 0], color: 0x00ff00, text: 'Y' },
-    { vec: [0, 0, 5], color: 0x0000ff, text: 'Z' }
+  // Axes (Z-up)
+  axesGroup = new THREE.Group();
+  const axisLen = 2;
+  const axes = [
+    { dir: new THREE.Vector3(1, 0, 0), color: 0xff0000, label: 'X', pos: new THREE.Vector3(axisLen, 0, 0) },
+    { dir: new THREE.Vector3(0, 1, 0), color: 0x00ff00, label: 'Y', pos: new THREE.Vector3(0, axisLen, 0) },
+    { dir: new THREE.Vector3(0, 0, 1), color: 0x0000ff, label: 'Z', pos: new THREE.Vector3(0, 0, axisLen) }
   ];
-  axesCfg.forEach(cfg => {
-    const pts = [new THREE.Vector3(0,0,0), new THREE.Vector3(...cfg.vec)];
-    const geom = new THREE.BufferGeometry().setFromPoints(pts);
-    const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: cfg.color }));
-    axesGroup.add(line);
-    const div = document.createElement('div');
-    div.className = 'wire-label';
-    div.textContent = cfg.text;
-    div.style.color = '#' + cfg.color.toString(16).padStart(6,'0');
-    div.style.fontWeight = 'bold';
-    const lbl = new CSS2DObject(div);
-    lbl.position.set(...cfg.vec);
-    axesGroup.add(lbl);
-    axisLabels.push(lbl);
+  axes.forEach(({ dir, color, label, pos }) => {
+    const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), axisLen, color);
+    const lbl = new CSS2DObject(createLabel(label));
+    lbl.position.copy(pos);
+    arrow.add(lbl);
+    axesGroup.add(arrow);
   });
-  axesGroup.rotation.x = -Math.PI/2;
   scene.add(axesGroup);
 
-  // Prepare groups
-  const wireGroup = new THREE.Group();
-  const feedGroup = new THREE.Group();
-  const wireMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
-
-  // Coerce and filter segments
-  geomData.forEach(g => {
-    if (Array.isArray(g.start)) g.start = g.start.map(v => Number(v));
-    if (Array.isArray(g.end)) g.end = g.end.map(v => Number(v));
-  });
-  const valid = geomData.filter(g => (
-    Array.isArray(g.start) && g.start.length===3 &&
-    Array.isArray(g.end) &&   g.end.length===3   &&
-    g.start.concat(g.end).every(n => Number.isFinite(n))
-  ));
-
-  // Draw segments
-  valid.forEach(g => {
-    const p1 = new THREE.Vector3(...g.start);
-    const p2 = new THREE.Vector3(...g.end);
-    const geom = new THREE.BufferGeometry().setFromPoints([p1,p2]);
-    wireGroup.add(new THREE.Line(geom, wireMat));
-
-    // Tag label
-    const mid = new THREE.Vector3().addVectors(p1,p2).multiplyScalar(0.5);
-    const div = document.createElement('div');
-    div.className = 'wire-label';
-    div.textContent = g.tag;
-    const tagLbl = new CSS2DObject(div);
-    tagLbl.position.copy(mid);
-    wireGroup.add(tagLbl);
-
-    // Feed points
-    if (feedMap[g.tag]) {
-      const dir = new THREE.Vector3().subVectors(p2,p1).normalize().multiplyScalar(0.1);
-      [dir.clone(), dir.clone().negate()].forEach(off => {
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(0.1,16,16),
-          new THREE.MeshBasicMaterial({ color: 0xffff00 })
-        );
-        dot.position.copy(p1.clone().add(off));
-        feedGroup.add(dot);
-      });
-    }
-  });
-  wireGroup.rotation.x = -Math.PI/2;
-  feedGroup.rotation.x = -Math.PI/2;
+  wireGroup = new THREE.Group();
+  feedGroup = new THREE.Group();
   scene.add(wireGroup);
   scene.add(feedGroup);
 
-  // Sync initial toggles
-  const gcb = document.getElementById('toggle-grid');
-  gridHelper.visible = gcb ? gcb.checked : true;
-  const acb = document.getElementById('toggle-axes');
-  axesGroup.visible = acb ? acb.checked : true;
-  axisLabels.forEach(lbl => lbl.visible = axesGroup.visible);
-  const fcb = document.getElementById('toggle-feed');
-  feedGroup.visible = fcb ? fcb.checked : true;
-
-  // Controls & animate
-  const controls = new OrbitControls(camera, renderer.domElement);
-  (function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-    labelRenderer.render(scene, camera);
-  })();
-
-  // Toggle handlers
-  gcb.addEventListener('change', e => gridHelper.visible = e.target.checked);
-  acb.addEventListener('change', e => {
-    axesGroup.visible = e.target.checked;
-    axisLabels.forEach(lbl=>lbl.visible=e.target.checked);
-  });
-  fcb.addEventListener('change', e => feedGroup.visible = e.target.checked);
-
-  // Populate table
-  const table = document.getElementById('wire-table');
-  if (table) {
-    const tbody = table.querySelector('tbody');
-    tbody.innerHTML = '';
-    valid.forEach(g => {
-      const p1 = new THREE.Vector3(...g.start);
-      const p2 = new THREE.Vector3(...g.end);
-      const len = p1.distanceTo(p2).toFixed(3);
-      const row = document.createElement('tr');
-      row.innerHTML = `
-        <td>${g.tag}</td>
-        <td>${len}</td>
-        <td>${g.start.join(', ')}</td>
-        <td>${g.end.join(', ')}</td>
-        <td>${g.segments}</td>
-        <td>${feedMap[g.tag] ? 'Yes' : 'No'}</td>
-      `;
-      tbody.appendChild(row);
-    });
-  }
+  tableBody = document.querySelector('#wire-table tbody');
 }
 
-// Bind on tab click
-window.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      if (tab.dataset.tab === 'visualization') setTimeout(renderVisualization,50);
-    });
+function createLabel(text) {
+  const div = document.createElement('div');
+  div.className = 'label';
+  div.textContent = text;
+  div.style.color = '#fff';
+  div.style.fontSize = '12px';
+  return div;
+}
+
+function populateTable(geometry, feedMap) {
+  tableBody.innerHTML = '';
+  geometry.forEach(item => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${item.tag}</td>
+      <td>${(item.length || 0).toFixed(3)}</td>
+      <td>${item.start.join(', ')}</td>
+      <td>${item.end.join(', ')}</td>
+      <td>${item.segments}</td>
+      <td>${feedMap[item.tag] ? 'Yes' : ''}</td>
+    `;
+    tableBody.appendChild(row);
   });
-});
+}
+
+function renderGeometry(geometry, feedMap) {
+  wireGroup.clear();
+  feedGroup.clear();
+  geometry.forEach(item => {
+    const points = [];
+    for (let i = 0; i <= item.segments; i++) {
+      const t = i / item.segments;
+      const x = item.start[0] + (item.end[0] - item.start[0]) * t;
+      const y = item.start[1] + (item.end[1] - item.start[1]) * t;
+      const z = item.start[2] + (item.end[2] - item.start[2]) * t;
+      points.push(new THREE.Vector3(x, y, z));
+    }
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color: 0xffff00 })
+    );
+    wireGroup.add(line);
+    if (window._necFeedMap[item.tag]) {
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff00ff })
+      );
+      sphere.position.copy(points[Math.floor(points.length / 2)]);
+      feedGroup.add(sphere);
+    }
+  });
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+function onWindowResize() {
+  const container = document.getElementById('viz-canvas');
+  const w = container.clientWidth, h = container.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
+}
+
+export function renderVisualization() {
+  console.log('Geometry:', window._necGeometry);
+  console.log('Feed Map:', window._necFeedMap);
+  initScene();
+  renderGeometry(window._necGeometry, window._necFeedMap);
+  populateTable(window._necGeometry, window._necFeedMap);
+  animate();
+
+  document.getElementById('toggle-grid').addEventListener('change', e => gridHelper.visible = e.target.checked);
+  document.getElementById('toggle-axes').addEventListener('change', e => axesGroup.visible = e.target.checked);
+  document.getElementById('toggle-feed').addEventListener('change', e => feedGroup.visible = e.target.checked);
+
+  window.addEventListener('resize', onWindowResize);
+}
+
+window.addEventListener('DOMContentLoaded', renderVisualization);
