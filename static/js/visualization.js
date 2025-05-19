@@ -19,11 +19,12 @@ export function renderVisualization() {
   drawWiresAndFeeds(window._necGeometry, window._necFeedMap);
   addAxes(window._necGeometry);
 
-  // right after we build the axes, ensure labels match the toggle state
-  const tAxes = document.getElementById('toggle-axes');
-  axesGroup.children.forEach(obj => {
-    if (obj.isCSS2DObject) {
-      obj.element.style.display = tAxes.checked ? '' : 'none';
+  // — ensure CSS2D axis-labels follow the toggle on initial render —
+  const tAxes0 = document.getElementById('toggle-axes');
+  axesGroup.children.forEach(child => {
+    // CSS2DObject is imported at top
+    if (child instanceof CSS2DObject) {
+      child.visible = tAxes0.checked;
     }
   });
 
@@ -84,13 +85,13 @@ function initScene() {
   const tAxes = document.getElementById('toggle-axes');
   tAxes.addEventListener('change', () => {
     axesGroup.visible = tAxes.checked;
-    // hide/show the CSS2D axis‐labels too:
-    axesGroup.children.forEach(obj => {
-      if (obj.isCSS2DObject) {
-        obj.element.style.display = tAxes.checked ? '' : 'none';
+    // toggle CSS2DObject.visible so CSS2DRenderer skips them
+    axesGroup.children.forEach(child => {
+      if (child instanceof CSS2DObject) {
+        child.visible = tAxes.checked;
       }
     });
-  });
+    });
   axesGroup.visible = tAxes.checked;
 
   window.addEventListener('resize', onWindowResize);
