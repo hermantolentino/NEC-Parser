@@ -18,7 +18,8 @@
     .viz-instructions { margin-top: 10px; font-size: 0.9em; color: #aaa; }
     .viz-toggles { margin-top: 10px; color: #ccc; }
     .viz-toggles label { margin-right: 15px; }
-    .wire-label { color: #fff; background: rgba(0,0,0,0.6); padding: 2px 4px; border-radius: 2px; font-size: 12px; }
+    .wire-label { color: #FFD700; font-size: 0.8em; }
+    .axis-label { color: #FFF; font-weight: bold; }
 
     /* line numbers in green */
     .nec-line-number {
@@ -156,9 +157,10 @@
       <div id="viz-spinner"></div>
       <div class="viz-instructions">Rotate: drag ⟷ | Zoom: scroll 🔍 | Pan: right-drag</div>
       <div class="viz-toggles">
-        <label><input type="checkbox" id="toggle-grid" checked> Show Ground Grid</label>
-        <label><input type="checkbox" id="toggle-feed" checked> Show Feed Points</label>
-        <label><input type="checkbox" id="toggle-axes" checked> Show XYZ Axes</label>
+          <label><input type="checkbox" id="toggle-grid" checked="checked"> Show Ground Grid</label>
+          <label><input type="checkbox" id="toggle-feed" checked="checked"> Show Feed Points</label>
+          <label><input type="checkbox" id="toggle-axes" checked="checked"> Show XYZ Axes</label>
+        </div>
       </div>
       <h3>Wire Geometry</h3>
       <table id="wire-table">
@@ -210,10 +212,12 @@
       window._necFeedMap  = {
         {% for card in json_data.cards %}
           {% if card.type == 'EX' and card.params|length > 1 %}
-            {{ card.params[1] }}: true,
+            "{{ card.params[1] }}": true,
           {% endif %}
         {% endfor %}
       };
+      // kick off the 3D draw
+      renderVisualization();
     </script>
   {% endif %}
 </body>
