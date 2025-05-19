@@ -17,7 +17,7 @@ function initScene() {
   const w = container.clientWidth, h = container.clientHeight;
   camera = new THREE.PerspectiveCamera(45, w/h, 0.1, 1000);
   camera.up.set(0, 0, 1);
-  camera.position.set(0, -5, 5);
+  camera.position.set(0, -1, 1);
   camera.lookAt(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -34,20 +34,19 @@ function initScene() {
   controls.screenSpacePanning = false;
   controls.update();
 
-  // Ground grid (XY plane)
+  // initial grid (will be resized to fit geometry)
   gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
   gridHelper.rotation.x = Math.PI / 2;
   scene.add(gridHelper);
 
-  // Axes (Z-up)
+  // axes (Z up)
   axesGroup = new THREE.Group();
-  const axisLen = 2;
-  const axes = [
+  const axisLen = 1;
+  [
     { dir: new THREE.Vector3(1, 0, 0), color: 0xff0000, label: 'X', pos: new THREE.Vector3(axisLen, 0, 0) },
     { dir: new THREE.Vector3(0, 1, 0), color: 0x00ff00, label: 'Y', pos: new THREE.Vector3(0, axisLen, 0) },
     { dir: new THREE.Vector3(0, 0, 1), color: 0x0000ff, label: 'Z', pos: new THREE.Vector3(0, 0, axisLen) }
-  ];
-  axes.forEach(({ dir, color, label, pos }) => {
+  ].forEach(({ dir, color, label, pos }) => {
     const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), axisLen, color);
     const lbl = new CSS2DObject(createLabel(label));
     lbl.position.copy(pos);
@@ -92,6 +91,8 @@ function populateTable(geometry, feedMap) {
 function renderGeometry(geometry, feedMap) {
   wireGroup.clear();
   feedGroup.clear();
+  const tmpVec = new THREE.Vector3();
+
   geometry.forEach(item => {
     const points = [];
     for (let i = 0; i <= item.segments; i++) {
@@ -101,20 +102,47 @@ function renderGeometry(geometry, feedMap) {
       const z = item.start[2] + (item.end[2] - item.start[2]) * t;
       points.push(new THREE.Vector3(x, y, z));
     }
+
     const line = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
       new THREE.LineBasicMaterial({ color: 0xffff00 })
     );
     wireGroup.add(line);
-    if (window._necFeedMap[item.tag]) {
+
+    if (feedMap[item.tag]) {
       const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.05, 8, 8),
+        new THREE.SphereGeometry(0.1, 12, 12),
         new THREE.MeshBasicMaterial({ color: 0xff00ff })
       );
       sphere.position.copy(points[Math.floor(points.length / 2)]);
       feedGroup.add(sphere);
     }
   });
+
+  // fit grid and camera to geometry
+  fitView();
+}
+
+function fitView() {
+  // bounding box of wires
+  const box = new THREE.Box3().setFromObject(wireGroup);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z, 1);
+
+  // resize gridHelper
+  scene.remove(gridHelper);
+  gridHelper = new THREE.GridHelper(maxDim * 2, Math.ceil(maxDim));
+  gridHelper.rotation.x = Math.PI / 2;
+  scene.add(gridHelper);
+
+  // reposition camera
+  controls.target.copy(center);
+  camera.position.set(center.x, center.y - maxDim, center.z + maxDim);
+  camera.near = maxDim / 10;
+  camera.far = maxDim * 10;
+  camera.updateProjectionMatrix();
+  controls.update();
 }
 
 function animate() {
@@ -134,11 +162,9 @@ function onWindowResize() {
 }
 
 export function renderVisualization() {
-  console.log('Geometry:', window._necGeometry);
-  console.log('Feed Map:', window._necFeedMap);
   initScene();
-  renderGeometry(window._necGeometry, window._necFeedMap);
-  populateTable(window._necGeometry, window._necFeedMap);
+  renderGeometry(window._necGeometry || [], window._necFeedMap || {});
+  populateTable(window._necGeometry || [], window._necFeedMap || {});
   animate();
 
   document.getElementById('toggle-grid').addEventListener('change', e => gridHelper.visible = e.target.checked);
