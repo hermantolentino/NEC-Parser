@@ -7,10 +7,26 @@ let scene, camera, renderer, labelRenderer, controls;
 let gridHelper, axesGroup, wireGroup, feedGroup;
 let tableBody;
 
+// helper to clear all children of a group
+function clearGroup(group) {
+  while (group.children.length) {
+    group.remove(group.children[0]);
+  }
+}
+
 export function renderVisualization() {
   initScene();
   drawWiresAndFeeds(window._necGeometry, window._necFeedMap);
   addAxes(window._necGeometry);
+
+  // right after we build the axes, ensure labels match the toggle state
+  const tAxes = document.getElementById('toggle-axes');
+  axesGroup.children.forEach(obj => {
+    if (obj.isCSS2DObject) {
+      obj.element.style.display = tAxes.checked ? '' : 'none';
+    }
+  });
+
   fitViewToGeometry(window._necGeometry);
   populateTable(window._necGeometry, window._necFeedMap);
   animate();
@@ -20,15 +36,14 @@ function initScene() {
   const container = document.getElementById('viz-canvas');
   container.innerHTML = '';  // clear previous canvas
 
-  const w = container.clientWidth,
-        h = container.clientHeight;
+  const w = container.clientWidth, h = container.clientHeight;
 
   scene = new THREE.Scene();
-  scene.up.set(0,0,1);
+  scene.up.set(0, 0, 1);
 
-  camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 1000);
-  camera.up.set(0,0,1);
-  camera.position.set(1,1,1);
+  camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 1000);
+  camera.up.set(0, 0, 1);
+  camera.position.set(1, 1, 1);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -45,53 +60,57 @@ function initScene() {
 
   // Grid (XY plane)
   gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
-  gridHelper.rotation.x = Math.PI/2;
+  gridHelper.rotation.x = Math.PI / 2;
   scene.add(gridHelper);
 
   // Groups
-  axesGroup = new THREE.Group(); scene.add(axesGroup);
-  wireGroup = new THREE.Group(); scene.add(wireGroup);
-  feedGroup = new THREE.Group(); scene.add(feedGroup);
+  axesGroup = new THREE.Group();  scene.add(axesGroup);
+  wireGroup = new THREE.Group();  scene.add(wireGroup);
+  feedGroup = new THREE.Group();  scene.add(feedGroup);
 
-  // Table body reference
   tableBody = document.querySelector('#wire-table tbody');
 
-  // GRID TOGGLE
+  //
+  // BIND TOGGLES ONCE
+  //
   const tGrid = document.getElementById('toggle-grid');
-  tGrid.addEventListener('change', e => gridHelper.visible = e.target.checked);
+  tGrid.addEventListener('change', () => gridHelper.visible = tGrid.checked);
   gridHelper.visible = tGrid.checked;
 
-  // FEED‐POINTS TOGGLE
   const tFeed = document.getElementById('toggle-feed');
-  tFeed.addEventListener('change', e => feedGroup.visible = e.target.checked);
+  tFeed.addEventListener('change', () => feedGroup.visible = tFeed.checked);
   feedGroup.visible = tFeed.checked;
 
-  // AXES TOGGLE
   const tAxes = document.getElementById('toggle-axes');
-  tAxes.addEventListener('change', e => axesGroup.visible = e.target.checked);
+  tAxes.addEventListener('change', () => {
+    axesGroup.visible = tAxes.checked;
+    // hide/show the CSS2D axis‐labels too:
+    axesGroup.children.forEach(obj => {
+      if (obj.isCSS2DObject) {
+        obj.element.style.display = tAxes.checked ? '' : 'none';
+      }
+    });
+  });
   axesGroup.visible = tAxes.checked;
-  
+
   window.addEventListener('resize', onWindowResize);
 }
 
-function drawWiresAndFeeds(geomData, feedMap) {
-  wireGroup.clear();
-  feedGroup.clear();
+export function drawWiresAndFeeds(geomData, feedMap) {
+  clearGroup(wireGroup);
+  clearGroup(feedGroup);
 
   const matWire = new THREE.LineBasicMaterial({ color: 0xCCCC00 });
-  const matFeed = new THREE.MeshBasicMaterial({ color: 0xFF00FF });
+  const matFeed = new THREE.MeshBasicMaterial({ color: 0xFF0000 });
   const feedSphere = new THREE.SphereGeometry(0.05, 8, 8);
 
   geomData.forEach(({ start, end, tag }) => {
-    // Wire
-    const pts = [
-      new THREE.Vector3(...start),
-      new THREE.Vector3(...end)
-    ];
+    // draw the wire
+    const pts = [ new THREE.Vector3(...start), new THREE.Vector3(...end) ];
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
     wireGroup.add(new THREE.Line(geo, matWire));
 
-    // Tag label at midpoint
+    // label the wire
     const mid = pts[0].clone().add(pts[1]).multiplyScalar(0.5);
     const div = document.createElement('div');
     div.className = 'wire-label';
@@ -100,7 +119,7 @@ function drawWiresAndFeeds(geomData, feedMap) {
     label.position.copy(mid);
     scene.add(label);
 
-    // Feed sphere
+    // feed point (red sphere)
     if (feedMap[tag]) {
       const sph = new THREE.Mesh(feedSphere, matFeed);
       sph.position.copy(mid);
@@ -109,38 +128,37 @@ function drawWiresAndFeeds(geomData, feedMap) {
   });
 }
 
-function addAxes(geomData) {
-  axesGroup.clear();
+export function addAxes(geomData) {
+  clearGroup(axesGroup);
 
-  // Find geometry extent
+  // determine a good axis length
   let maxLen = 1;
   geomData.forEach(({ start, end }) => {
-    maxLen = Math.max(
-      maxLen,
-      new THREE.Vector3(...start).distanceTo(new THREE.Vector3(...end))
-    );
+    const d = new THREE.Vector3(...start).distanceTo(new THREE.Vector3(...end));
+    maxLen = Math.max(maxLen, d);
   });
   const len = maxLen * 1.2;
 
   const axes = [
-    { dir:[1,0,0], color:0xFF0000, label:'X' },
-    { dir:[0,1,0], color:0x00FF00, label:'Y' },
-    { dir:[0,0,1], color:0x0000FF, label:'Z' }
+    { dir: [1, 0, 0], color: 0xFF0000, label: 'X' },
+    { dir: [0, 1, 0], color: 0x00FF00, label: 'Y' },
+    { dir: [0, 0, 1], color: 0x0000FF, label: 'Z' },
   ];
-  axes.forEach(({dir, color, label}) => {
-    const material = new THREE.LineBasicMaterial({ color });
-    const pts = [
-      new THREE.Vector3(0,0,0),
-      new THREE.Vector3(...dir).multiplyScalar(len)
-    ];
-    const g = new THREE.BufferGeometry().setFromPoints(pts);
-    axesGroup.add(new THREE.Line(g, material));
 
+  axes.forEach(({ dir, color, label }) => {
+    // the line itself
+    const start = new THREE.Vector3(0, 0, 0);
+    const end   = new THREE.Vector3(...dir).multiplyScalar(len);
+    const geo   = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const mat   = new THREE.LineBasicMaterial({ color });
+    axesGroup.add(new THREE.Line(geo, mat));
+
+    // the CSS2D label
     const div = document.createElement('div');
-    div.className = 'wire-label';
+    div.className = 'axis-label';
     div.textContent = label;
     const lbl = new CSS2DObject(div);
-    lbl.position.copy(pts[1]);
+    lbl.position.copy(end);
     axesGroup.add(lbl);
   });
 }
