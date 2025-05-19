@@ -33,6 +33,23 @@
       white-space: pre;
       font-family: monospace;
     }
+    /* spinner, hidden by default */
+    #viz-spinner {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top: 4px solid #fff;
+      border-radius: 50%;
+      width: 40px; height: 40px;
+      animation: spin 1s linear infinite;
+      z-index: 10;
+    }
+    @keyframes spin {
+      0%   { transform: translate(-50%,-50%) rotate(0deg); }
+      100% { transform: translate(-50%,-50%) rotate(360deg); }
+    }
   </style>
 
   <!-- import-map so ES modules can import 'three' -->
@@ -44,6 +61,7 @@
   }
   </script>
 </head>
+
 <body>
   <h1>NEC Converter</h1>
 
@@ -58,12 +76,12 @@
 
   {% if show_results %}
     <div class="tabs">
-      <div class="tab active"       data-tab="original">Original NEC</div>
-      <div class="tab"              data-tab="json">JSON Output</div>
-      <div class="tab"              data-tab="reconv">Reconverted NEC</div>
-      <div class="tab"              data-tab="fidelity">Fidelity Scores</div>
-      <div class="tab"              data-tab="visualization">Visualization</div>
-      <div class="tab"              data-tab="simulation">Simulation</div>
+      <div class="tab active"      data-tab="original">Original NEC</div>
+      <div class="tab"             data-tab="json">JSON Output</div>
+      <div class="tab"             data-tab="reconv">Reconverted NEC</div>
+      <div class="tab"             data-tab="fidelity">Fidelity Scores</div>
+      <div class="tab"             data-tab="visualization">Visualization</div>
+      <div class="tab"             data-tab="simulation">Simulation</div>
     </div>
 
     <!-- Original NEC -->
@@ -78,7 +96,6 @@
           {% endfor %}
         </ul>
       {% endif %}
-
       <h3>Raw NEC Deck</h3>
       <div class="nec-line">
         {% for line in original_text.splitlines() %}
@@ -102,14 +119,12 @@
     <!-- FIDELITY SCORES -->
     <div id="fidelity" class="tab-content">
       <h2>Fidelity Scores</h2>
-
       <p>
         <strong>Mean overall fidelity:</strong>
         {{ (fidelity_mean * 100) | round(2) }}% &nbsp;&nbsp;
         <strong>Std Dev:</strong>
         {{ (fidelity_std * 100) | round(2) }}%
       </p>
-
       <table>
         <thead>
           <tr>
@@ -134,13 +149,11 @@
       </table>
     </div>
 
-    <!-- VISUALIZATION -->
+    <!-- Antenna Visualization -->
     <div id="visualization" class="tab-content">
       <h2>Antenna Visualization</h2>
       <div id="viz-canvas"></div>
-      <div class="viz-instructions">
-        Rotate: drag ⟷ | Zoom: scroll 🔍 | Pan: right-drag
-      </div>
+      <div class="viz-instructions">Rotate: drag ⟷ | Zoom: scroll 🔍 | Pan: right-drag</div>
       <div class="viz-toggles">
         <label><input type="checkbox" id="toggle-grid" checked> Show Ground Grid</label>
         <label><input type="checkbox" id="toggle-feed" checked> Show Feed Points</label>
@@ -158,41 +171,45 @@
       </table>
     </div>
 
-    <!-- SIMULATION -->
+    <!-- Simulation Tab -->
     <div id="simulation" class="tab-content">
       <h2>Simulation Tools</h2>
-      <p>Coming soon: current distributions, frequency sweeps, radiation patterns, etc.</p>
+      <p>Coming soon: current distributions, frequency sweeps, radiation pattern visualizations, etc.</p>
     </div>
 
-    <!-- Tab switching logic -->
-    <script>
+    <!-- Tab switching & deferred render -->
+    <script type="module">
+      // correct path into Flask's static folder:
+      import { renderVisualization } from '/static/js/visualization.js';
+
       document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.tab').forEach(tab => {
           tab.addEventListener('click', () => {
-            // deactivate all
+            // deactivate all tabs & panels
             document.querySelectorAll('.tab, .tab-content')
                     .forEach(el => el.classList.remove('active'));
-            // activate tab + corresponding content
+            // activate clicked tab and its content
             tab.classList.add('active');
             document.getElementById(tab.dataset.tab).classList.add('active');
+
+            // only render 3D on the visualization tab
+            if (tab.dataset.tab === 'visualization') {
+              renderVisualization();
+            }
           });
         });
       });
-    </script>
 
-    <!-- Inject geometry & feed-map for visualization -->
-    <script>
-      window._necGeometry = {{ geometry | tojson }};
+      // pass geometry + feed map into the global namespace for the module:
+      window._necGeometry = {{ geometry|tojson }};
       window._necFeedMap  = {
         {% for card in json_data.cards %}
-          {% if card.type == 'EX' %}{{ card.params[1] }}: true,{% endif %}
+          {% if card.type == 'EX' and card.params|length > 1 %}
+            {{ card.params[1] }}: true,
+          {% endif %}
         {% endfor %}
       };
-      console.log('All cards (first 20):', {{ json_data.cards[:20] | tojson }});
     </script>
-
-    <!-- Visualization module -->
-    <script type="module" src="{{ url_for('static', filename='js/visualization.js') }}"></script>
   {% endif %}
 </body>
 </html>

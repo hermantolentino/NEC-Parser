@@ -7,18 +7,28 @@ let scene, camera, renderer, labelRenderer, controls;
 let gridHelper, axesGroup, wireGroup, feedGroup;
 let tableBody;
 
+export function renderVisualization() {
+  initScene();
+  drawWiresAndFeeds(window._necGeometry, window._necFeedMap);
+  addAxes(window._necGeometry);
+  fitViewToGeometry(window._necGeometry);
+  populateTable(window._necGeometry, window._necFeedMap);
+  animate();
+}
+
 function initScene() {
   const container = document.getElementById('viz-canvas');
-  while (container.firstChild) container.removeChild(container.firstChild);
+  container.innerHTML = '';  // clear previous canvas
+
+  const w = container.clientWidth,
+        h = container.clientHeight;
 
   scene = new THREE.Scene();
-  scene.up.set(0, 0, 1);
+  scene.up.set(0,0,1);
 
-  const w = container.clientWidth, h = container.clientHeight;
-  camera = new THREE.PerspectiveCamera(45, w/h, 0.1, 1000);
-  camera.up.set(0, 0, 1);
-  camera.position.set(0, -1, 1);
-  camera.lookAt(0, 0, 0);
+  camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 1000);
+  camera.up.set(0,0,1);
+  camera.position.set(1,1,1);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -31,118 +41,125 @@ function initScene() {
   container.appendChild(labelRenderer.domElement);
 
   controls = new OrbitControls(camera, labelRenderer.domElement);
-  controls.screenSpacePanning = false;
-  controls.update();
+  controls.enableDamping = true;
 
-  // initial grid (will be resized to fit geometry)
-  gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
-  gridHelper.rotation.x = Math.PI / 2;
+  // Grid (XY plane)
+  gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
+  gridHelper.rotation.x = Math.PI/2;
   scene.add(gridHelper);
 
-  // axes (Z up)
-  axesGroup = new THREE.Group();
-  const axisLen = 1;
-  [
-    { dir: new THREE.Vector3(1, 0, 0), color: 0xff0000, label: 'X', pos: new THREE.Vector3(axisLen, 0, 0) },
-    { dir: new THREE.Vector3(0, 1, 0), color: 0x00ff00, label: 'Y', pos: new THREE.Vector3(0, axisLen, 0) },
-    { dir: new THREE.Vector3(0, 0, 1), color: 0x0000ff, label: 'Z', pos: new THREE.Vector3(0, 0, axisLen) }
-  ].forEach(({ dir, color, label, pos }) => {
-    const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0, 0), axisLen, color);
-    const lbl = new CSS2DObject(createLabel(label));
-    lbl.position.copy(pos);
-    arrow.add(lbl);
-    axesGroup.add(arrow);
-  });
-  scene.add(axesGroup);
+  // Groups
+  axesGroup = new THREE.Group(); scene.add(axesGroup);
+  wireGroup = new THREE.Group(); scene.add(wireGroup);
+  feedGroup = new THREE.Group(); scene.add(feedGroup);
 
-  wireGroup = new THREE.Group();
-  feedGroup = new THREE.Group();
-  scene.add(wireGroup);
-  scene.add(feedGroup);
-
+  // Table body reference
   tableBody = document.querySelector('#wire-table tbody');
+
+  window.addEventListener('resize', onWindowResize);
 }
 
-function createLabel(text) {
-  const div = document.createElement('div');
-  div.className = 'label';
-  div.textContent = text;
-  div.style.color = '#fff';
-  div.style.fontSize = '12px';
-  return div;
-}
-
-function populateTable(geometry, feedMap) {
-  tableBody.innerHTML = '';
-  geometry.forEach(item => {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${item.tag}</td>
-      <td>${(item.length || 0).toFixed(3)}</td>
-      <td>${item.start.join(', ')}</td>
-      <td>${item.end.join(', ')}</td>
-      <td>${item.segments}</td>
-      <td>${feedMap[item.tag] ? 'Yes' : ''}</td>
-    `;
-    tableBody.appendChild(row);
-  });
-}
-
-function renderGeometry(geometry, feedMap) {
+function drawWiresAndFeeds(geomData, feedMap) {
   wireGroup.clear();
   feedGroup.clear();
-  const tmpVec = new THREE.Vector3();
 
-  geometry.forEach(item => {
-    const points = [];
-    for (let i = 0; i <= item.segments; i++) {
-      const t = i / item.segments;
-      const x = item.start[0] + (item.end[0] - item.start[0]) * t;
-      const y = item.start[1] + (item.end[1] - item.start[1]) * t;
-      const z = item.start[2] + (item.end[2] - item.start[2]) * t;
-      points.push(new THREE.Vector3(x, y, z));
-    }
+  const matWire = new THREE.LineBasicMaterial({ color: 0xCCCC00 });
+  const matFeed = new THREE.MeshBasicMaterial({ color: 0xFF00FF });
+  const feedSphere = new THREE.SphereGeometry(0.05, 8, 8);
 
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xffff00 })
-    );
-    wireGroup.add(line);
+  geomData.forEach(({ start, end, tag }) => {
+    // Wire
+    const pts = [
+      new THREE.Vector3(...start),
+      new THREE.Vector3(...end)
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    wireGroup.add(new THREE.Line(geo, matWire));
 
-    if (feedMap[item.tag]) {
-      const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.1, 12, 12),
-        new THREE.MeshBasicMaterial({ color: 0xff00ff })
-      );
-      sphere.position.copy(points[Math.floor(points.length / 2)]);
-      feedGroup.add(sphere);
+    // Tag label at midpoint
+    const mid = pts[0].clone().add(pts[1]).multiplyScalar(0.5);
+    const div = document.createElement('div');
+    div.className = 'wire-label';
+    div.textContent = tag;
+    const label = new CSS2DObject(div);
+    label.position.copy(mid);
+    scene.add(label);
+
+    // Feed sphere
+    if (feedMap[tag]) {
+      const sph = new THREE.Mesh(feedSphere, matFeed);
+      sph.position.copy(mid);
+      feedGroup.add(sph);
     }
   });
-
-  // fit grid and camera to geometry
-  fitView();
 }
 
-function fitView() {
-  // bounding box of wires
-  const box = new THREE.Box3().setFromObject(wireGroup);
+function addAxes(geomData) {
+  axesGroup.clear();
+
+  // Find geometry extent
+  let maxLen = 1;
+  geomData.forEach(({ start, end }) => {
+    maxLen = Math.max(
+      maxLen,
+      new THREE.Vector3(...start).distanceTo(new THREE.Vector3(...end))
+    );
+  });
+  const len = maxLen * 1.2;
+
+  const axes = [
+    { dir:[1,0,0], color:0xFF0000, label:'X' },
+    { dir:[0,1,0], color:0x00FF00, label:'Y' },
+    { dir:[0,0,1], color:0x0000FF, label:'Z' }
+  ];
+  axes.forEach(({dir, color, label}) => {
+    const material = new THREE.LineBasicMaterial({ color });
+    const pts = [
+      new THREE.Vector3(0,0,0),
+      new THREE.Vector3(...dir).multiplyScalar(len)
+    ];
+    const g = new THREE.BufferGeometry().setFromPoints(pts);
+    axesGroup.add(new THREE.Line(g, material));
+
+    const div = document.createElement('div');
+    div.className = 'wire-label';
+    div.textContent = label;
+    const lbl = new CSS2DObject(div);
+    lbl.position.copy(pts[1]);
+    axesGroup.add(lbl);
+  });
+}
+
+function fitViewToGeometry(geomData) {
+  const box = new THREE.Box3();
+  geomData.forEach(({ start, end }) => {
+    box.expandByPoint(new THREE.Vector3(...start));
+    box.expandByPoint(new THREE.Vector3(...end));
+  });
   const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z, 1);
+  const radius = box.getSize(new THREE.Vector3()).length()/2;
 
-  // resize gridHelper
-  scene.remove(gridHelper);
-  gridHelper = new THREE.GridHelper(maxDim * 2, Math.ceil(maxDim));
-  gridHelper.rotation.x = Math.PI / 2;
-  scene.add(gridHelper);
-
-  // reposition camera
+  camera.position.copy(
+    center.clone().add(new THREE.Vector3(1,1,1).multiplyScalar(radius*2))
+  );
   controls.target.copy(center);
-  camera.position.set(center.x, center.y - maxDim, center.z + maxDim);
-  camera.near = maxDim / 10;
-  camera.far = maxDim * 10;
-  camera.updateProjectionMatrix();
   controls.update();
+}
+
+function populateTable(geomData, feedMap) {
+  tableBody.innerHTML = '';
+  geomData.forEach(({ tag, length, start, end, segments }) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${tag}</td>
+      <td>${(length||0).toFixed(3)}</td>
+      <td>${start.join(', ')}</td>
+      <td>${end.join(', ')}</td>
+      <td>${segments}</td>
+      <td>${feedMap[tag] ? 'Yes' : ''}</td>
+    `;
+    tableBody.appendChild(tr);
+  });
 }
 
 function animate() {
@@ -155,23 +172,8 @@ function animate() {
 function onWindowResize() {
   const container = document.getElementById('viz-canvas');
   const w = container.clientWidth, h = container.clientHeight;
-  camera.aspect = w / h;
+  camera.aspect = w/h;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  labelRenderer.setSize(w, h);
+  renderer.setSize(w,h);
+  labelRenderer.setSize(w,h);
 }
-
-export function renderVisualization() {
-  initScene();
-  renderGeometry(window._necGeometry || [], window._necFeedMap || {});
-  populateTable(window._necGeometry || [], window._necFeedMap || {});
-  animate();
-
-  document.getElementById('toggle-grid').addEventListener('change', e => gridHelper.visible = e.target.checked);
-  document.getElementById('toggle-axes').addEventListener('change', e => axesGroup.visible = e.target.checked);
-  document.getElementById('toggle-feed').addEventListener('change', e => feedGroup.visible = e.target.checked);
-
-  window.addEventListener('resize', onWindowResize);
-}
-
-window.addEventListener('DOMContentLoaded', renderVisualization);
