@@ -56,6 +56,21 @@ function initScene() {
   // Table body reference
   tableBody = document.querySelector('#wire-table tbody');
 
+  // GRID TOGGLE
+  const tGrid = document.getElementById('toggle-grid');
+  tGrid.addEventListener('change', e => gridHelper.visible = e.target.checked);
+  gridHelper.visible = tGrid.checked;
+
+  // FEED‐POINTS TOGGLE
+  const tFeed = document.getElementById('toggle-feed');
+  tFeed.addEventListener('change', e => feedGroup.visible = e.target.checked);
+  feedGroup.visible = tFeed.checked;
+
+  // AXES TOGGLE
+  const tAxes = document.getElementById('toggle-axes');
+  tAxes.addEventListener('change', e => axesGroup.visible = e.target.checked);
+  axesGroup.visible = tAxes.checked;
+  
   window.addEventListener('resize', onWindowResize);
 }
 

@@ -153,6 +153,7 @@
     <div id="visualization" class="tab-content">
       <h2>Antenna Visualization</h2>
       <div id="viz-canvas"></div>
+      <div id="viz-spinner"></div>
       <div class="viz-instructions">Rotate: drag ⟷ | Zoom: scroll 🔍 | Pan: right-drag</div>
       <div class="viz-toggles">
         <label><input type="checkbox" id="toggle-grid" checked> Show Ground Grid</label>
@@ -194,7 +195,11 @@
 
             // only render 3D on the visualization tab
             if (tab.dataset.tab === 'visualization') {
-              renderVisualization();
+              document.getElementById('viz-spinner').style.display = 'block';
+              setTimeout(() => {
+                renderVisualization();
+                document.getElementById('viz-spinner').style.display = 'none';
+              }, 50);              
             }
           });
         });
